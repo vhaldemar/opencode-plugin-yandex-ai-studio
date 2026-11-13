@@ -18,6 +18,10 @@ export interface CodexCatalogModel {
   readonly supportedInApi: boolean
 }
 
+export interface RemoteModel {
+  readonly id: string
+}
+
 /**
  * Fetch the curated model catalog from the Codex-compatible endpoint
  * (`GET {endpoint}` with `Authorization: Bearer <token>` and `x-folder-id`).
@@ -72,6 +76,46 @@ export async function fetchCodexModels(
         visible: m.visibility !== "hidden",
         supportedInApi: m.supported_in_api !== false,
       }))
+  } finally {
+    clearTimeout(timer)
+    opts.signal?.removeEventListener("abort", onAbort)
+  }
+}
+
+/**
+ * Fetch the raw model list from the OpenAI-compatible endpoint
+ * (`GET {endpoint}` with `Authorization: Bearer <token>`; the folder goes in
+ * the `OpenAI-Project` header there, unlike the Codex catalog's `x-folder-id`).
+ * Response shape: `{ data: [{ id, ... }] }`; ids are full modelID URIs
+ * (`gpt://<folder>/<name>/latest`).
+ */
+export async function fetchModels(
+  endpoint: string,
+  token: string,
+  opts: { timeoutMs?: number; signal?: AbortSignal; folderId?: string } = {},
+): Promise<readonly RemoteModel[]> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 5_000)
+  const onAbort = () => controller.abort()
+  opts.signal?.addEventListener("abort", onAbort)
+  try {
+    const res = await fetch(endpoint, {
+      headers: {
+        authorization: `Bearer ${token}`,
+        accept: "application/json",
+        ...(opts.folderId ? { "openai-project": opts.folderId } : {}),
+      },
+      signal: controller.signal,
+    })
+    if (!res.ok) {
+      const body = await res.text().catch(() => "<no body>")
+      // Never log the raw token: only its redacted prefix goes into the error.
+      throw new Error(`${endpoint} → HTTP ${res.status}: ${body.slice(0, 300)} (token=${token.slice(0, 6)}…)`)
+    }
+    const body = (await res.json()) as { data?: { id?: string }[] }
+    return (body.data ?? [])
+      .map((m) => ({ id: String(m.id) }))
+      .filter((m) => m.id.length > 0)
   } finally {
     clearTimeout(timer)
     opts.signal?.removeEventListener("abort", onAbort)

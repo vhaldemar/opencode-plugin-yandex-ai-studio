@@ -1,6 +1,6 @@
 import { Model, Plugin, Provider } from "@opencode/plugin"
 import { execFile } from "node:child_process"
-import { fetchCodexModels, type CodexCatalogModel } from "./models.js"
+import { fetchCodexModels, fetchModels, type CodexCatalogModel } from "./models.js"
 import { YandexAuth } from "./rpc.js"
 import {
   cleanYcEnv,
@@ -31,8 +31,17 @@ export interface Options {
    * `null` disables remote listing; the `models` option is then used as-is.
    */
   codexModelsEndpoint?: string | null
+  /**
+   * Raw OpenAI-compatible listing endpoint (`GET /v1/models`, folder via
+   * `OpenAI-Project`). Merged with the curated catalog: codex info wins for
+   * models present in both, the rest is added from here (filtered by
+   * `modelPrefixes`).
+   */
+  modelsEndpoint?: string | null
   /** How long a fetched model list stays valid. */
   modelsCacheMs?: number
+  /** Filter for the raw OpenAI listing: only ids with one of these prefixes. */
+  modelPrefixes?: string[]
   /** Model ids exposed by the provider on top of the catalog. */
   models?: (string | { id: string; name?: string; context?: number })[]
   /** Refresh tick; the token is refreshed only when close to expiry. */
@@ -45,6 +54,14 @@ export interface Options {
 
 const DEFAULT_BASE_URL = "https://apps.ai.api.cloud.yandex.net/v1"
 const DEFAULT_MODELS_CACHE_MS = 10 * 60 * 1000
+/** In the raw OpenAI listing only `gpt://` ids are chat-capable. */
+const DEFAULT_MODEL_PREFIXES = ["gpt://"]
+
+/** `gpt://<folder>/<name>/latest` → `<name>`; plain ids pass through. */
+function shortModelName(id: string): string {
+  const stripped = id.replace(/^[a-z]+:\/\/[^/]+\//, "").replace(/\/latest$/, "")
+  return stripped.length > 0 ? stripped : id
+}
 
 const STORAGE_KEY = "iam-token"
 
@@ -152,6 +169,11 @@ export default Plugin.define({
       o.codexModelsEndpoint === null
         ? undefined
         : o.codexModelsEndpoint ?? `${baseURL.replace(/\/+$/, "")}/models-codex`
+    const modelsEndpoint =
+      o.modelsEndpoint === null
+        ? undefined
+        : o.modelsEndpoint ?? `${baseURL.replace(/\/+$/, "")}/models`
+    const modelPrefixes = o.modelPrefixes ?? DEFAULT_MODEL_PREFIXES
     const modelsCacheMs = o.modelsCacheMs ?? DEFAULT_MODELS_CACHE_MS
 
     /** Configured specs take precedence over remotely discovered ids. */
@@ -171,38 +193,71 @@ export default Plugin.define({
     const allCodex = (pages: readonly CodexCatalogModel[]) => pages.filter((m) => m.visible && m.supportedInApi)
     let inventoryInflight: Promise<void> | undefined
     const refreshModels = () => {
-      if (codexModelsEndpoint === undefined) return Promise.resolve()
+      if (codexModelsEndpoint === undefined && modelsEndpoint === undefined) return Promise.resolve()
       inventoryInflight ??= (async () => {
         let token = manager.peek() ?? stored?.token
         if (!token) return
+        // TS: a local copy keeps the non-undefined narrowing inside closures.
+        let currentToken = token
         try {
           // 401/403 from YC usually means the cached IAM token is stale even
           // if our TTL math still considers it valid (restored from storage
           // after the real token already expired). Self-heal: force a fresh
-          // `yc iam create-token` and retry the catalog once.
-          let codex: readonly CodexCatalogModel[]
+          // `yc iam create-token` and retry both listings once.
+          const fetchAll = async () => {
+            let codex: readonly CodexCatalogModel[] = []
+            if (codexModelsEndpoint !== undefined) {
+              codex = await fetchCodexModels(codexModelsEndpoint, currentToken, { folderId })
+            }
+            let remote: readonly { id: string }[] = []
+            if (modelsEndpoint !== undefined) {
+              remote = await fetchModels(modelsEndpoint, currentToken, { folderId })
+            }
+            return { codex, remote }
+          }
+          let fetched: Awaited<ReturnType<typeof fetchAll>>
           try {
-            codex = await fetchCodexModels(codexModelsEndpoint, token, { folderId })
+            fetched = await fetchAll()
           } catch (err) {
             if (!/HTTP 40[13]/.test((err as Error).message)) throw err
             token = (await manager.force()).token
-            codex = await fetchCodexModels(codexModelsEndpoint, token, { folderId })
+            currentToken = token
+            fetched = await fetchAll()
           }
+          const { codex, remote } = fetched
+
+          // Merge: curated codex info wins; raw-listing models not in the
+          // catalog are appended (filtered to chat-capable `gpt://` ids).
+          const exactIds = new Map<string, string>()
+          for (const m of remote) {
+            exactIds.set(shortModelName(m.id), m.id)
+          }
+          const curated = allCodex(codex)
+          const covered = new Set(curated.map((m) => m.slug))
+          const catalogModels = curated.map((m) => {
+            const id = exactIds.get(m.slug) ?? m.id
+            const model = {
+              ...Model.Info.default(providerID, Model.ID.make(id)),
+              // Pretty display name from the catalog (already curated).
+              name: m.name,
+            }
+            if (m.context) model.limit.context = m.context
+            model.capabilities.input = m.vision ? ["text", "image"] : ["text"]
+            return model
+          })
+          const extraModels = remote
+            .filter((m) => exactIds.get(shortModelName(m.id)) === m.id) // dedup by slug
+            .filter((m) => modelPrefixes.some((p) => m.id.startsWith(p)))
+            .filter((m) => !covered.has(shortModelName(m.id)))
+            .map((m) => ({
+              ...Model.Info.default(providerID, Model.ID.make(m.id)),
+              // gpt://<folder>/<name>/latest → <name>
+              name: shortModelName(m.id),
+            }))
 
           const seen = new Set(configured.map((m) => String(m.id)))
-          if (codex.length > 0) {
-            inventory.models = allCodex(codex)
-              .filter((m) => !seen.has(m.id))
-              .map((m) => {
-                const model = {
-                  ...Model.Info.default(providerID, Model.ID.make(m.id)),
-                  // Pretty display name from the catalog (already curated).
-                  name: m.name,
-                }
-                if (m.context) model.limit.context = m.context
-                model.capabilities.input = m.vision ? ["text", "image"] : ["text"]
-                return model
-              })
+          if (catalogModels.length + extraModels.length > 0) {
+            inventory.models = [...catalogModels, ...extraModels].filter((m) => !seen.has(String(m.id)))
             inventory.checkedAt = Date.now()
           }
         } catch (err) {
@@ -236,16 +291,19 @@ export default Plugin.define({
     })
 
     // ---- start refresh flow in the background; never block setup() ----
-    if (codexModelsEndpoint === undefined && configured.length === 0) {
+    if (codexModelsEndpoint === undefined && modelsEndpoint === undefined && configured.length === 0) {
       console.warn(
-        "yandex-ai-studio: каталог моделей отключен (codexModelsEndpoint=null), а опция models пуста — провайдер будет без моделей",
+        "yandex-ai-studio: оба листинга отключены (codexModelsEndpoint=null, modelsEndpoint=null), а опция models пуста — провайдер будет без моделей",
       )
     }
     const kickRefresh = () =>
       manager
         .ensure()
         .then(async () => {
-          if (codexModelsEndpoint !== undefined && Date.now() - inventory.checkedAt > modelsCacheMs) {
+          if (
+            (codexModelsEndpoint !== undefined || modelsEndpoint !== undefined) &&
+            Date.now() - inventory.checkedAt > modelsCacheMs
+          ) {
             await refreshModels()
           }
           await ctx.provider.reload()
