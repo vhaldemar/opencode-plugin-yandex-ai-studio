@@ -127,5 +127,4 @@ npx tsc --noEmit
 
 ## TODO / идеи
 
-- Опция `authMode` для API-key (без `yc` вообще).
 - GUI-часть для OpenCode Desktop.
