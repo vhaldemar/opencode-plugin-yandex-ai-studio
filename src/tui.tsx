@@ -22,12 +22,13 @@ export default Plugin.define({
         .catch(() => {})
 
     const stop = auth.events.on("auth.waiting", (event) => {
-      const data = event.data as { profile: string; timeoutMs: number }
+      const data = event.data as { profile?: string; timeoutMs: number }
       const minutes = Math.round(data.timeoutMs / 60_000)
+      const whom = data.profile ? `профиль «${data.profile}»` : "профиль по умолчанию"
       setWaiting(true)
       context.ui.toast.show({
         title: "Yandex AI Studio",
-        message: `Требуется вход в Yandex Cloud (профиль «${data.profile}»): откройте браузер и авторизуйтесь. Ждём до ${minutes} мин.`,
+        message: `Требуется вход в Yandex Cloud (${whom}): откройте браузер и авторизуйтесь. Ждём до ${minutes} мин.`,
         variant: "warning",
       })
       notify("OpenCode ждёт входа в Yandex Cloud", "yc открыл браузер для авторизации")

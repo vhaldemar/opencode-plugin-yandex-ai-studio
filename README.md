@@ -86,8 +86,8 @@ opencode models             # yandex-ai-studio/... — модель из лис�
 
 ### Что задать в опциях обязательно
 
-- **`profile`** — профиль `yc` с живой федеративной сессией (`yc iam create-token --profile <имя>` должен отвечать без интерактива).
-- **`folderId`** — для user IAM-токенов обязателен: без него API отвечает «folder ID has to be provided in OpenAI-Project header». У федеративных профилей `config get folder-id` пуст, поэтому указывайте явно. Токен и folder должны быть из одного облака (плагин предупреждает, если в id моделей из листинга folder не совпал).
+- **`profile`** — опционален: если не указан, `yc iam create-token` вызывается **без** `--profile` и использует активный профиль yc (тот, что установлен через `yc config profile activate`). Если указываете — профиль должен иметь живую федеративную сессию.
+- **`folderId`** — для user IAM-токенов обязателен: без него API отвечает «folder ID has to be provided in OpenAI-Project header». Плагин пробует взять его из `yc config get folder-id [--profile]`; у федеративных профилей он часто пуст, тогда указывайте явно. Токен и folder должны быть из одного облака.
 
 Для headless-режимов (`opencode run`, сервер без TUI) TUI-часть просто не грузится — серверная часть самодостаточна.
 
@@ -102,7 +102,7 @@ opencode models             # yandex-ai-studio/... — модель из лис�
 
 | Опция | По умолчанию | Описание |
 |---|---|---|
-| `profile` | `"default"` | профиль `yc` для `iam create-token` |
+| `profile` | не задан → `yc` без `--profile` (активный профиль yc) | профиль `yc` для `iam create-token` |
 | `baseURL` | `https://apps.ai.api.cloud.yandex.net/v1` | база для всех endpoint'ов (apps-вход AI Studio); чат идёт в `{baseURL}/chat/completions` с folder в `OpenAI-Project` |
 | `codexModelsEndpoint` | `{baseURL}/models-codex` | ручка кураторского каталога (`x-folder-id`; `null` — отключить) |
 | `usageEndpoint` | `{baseURL}/api/codex/usage` | ручка квот подписки (`x-folder-id`; кэш 60 с) |

@@ -72,27 +72,28 @@ const STORAGE_KEY = "iam-token"
  * The OpenAI-compatible API requires it (OpenAI-Project header) for user IAM
  * tokens; warns when neither source provides one.
  */
-async function resolveFolderId(o: Options, profile: string, ycBin: string): Promise<string | undefined> {
+async function resolveFolderId(o: Options, profile: string | undefined, ycBin: string): Promise<string | undefined> {
   if (o.folderId) return o.folderId
+  const args = profile === undefined ? ["config", "get", "folder-id"] : ["config", "get", "folder-id", "--profile", profile]
   try {
     const out = await new Promise<string>((resolve, reject) => {
       execFile(
         ycBin,
-        ["config", "get", "folder-id", "--profile", profile],
+        args,
         { timeout: 5_000, env: cleanYcEnv(process.env) },
         (err, stdout) => (err ? reject(err) : resolve(stdout)),
       )
     })
     const folderId = out.trim()
     if (folderId) {
-      console.log("yandex-ai-studio: folder-id taken from yc profile:", profile)
+      console.log("yandex-ai-studio: folder-id taken from yc profile:", profile ?? "(active)")
       return folderId
     }
   } catch {
     // Profiles without folder-id (pure federation auth) are normal.
   }
   console.warn(
-    `yandex-ai-studio: folderId не задан (ни в опциях, ни в профиле yc «${profile}»). ` +
+    `yandex-ai-studio: folderId не задан (ни в опциях, ни в профиле yc «${profile ?? "(активный)"}»). ` +
       "API вернёт ошибку без заголовка OpenAI-Project; укажите опцию folderId.",
   )
   return undefined
@@ -102,7 +103,9 @@ export default Plugin.define({
   id: "yandex-ai-studio",
   async setup(ctx) {
     const o = (ctx.options ?? {}) as Options
-    const profile = o.profile ?? "default"
+    // No `--profile` arg unless the option is set: yc then uses its own
+    // active profile instead of a fabricated "default".
+    const profile = o.profile
     const providerID = Provider.ID.make(o.providerID ?? "yandex-ai-studio")
     const baseURL = o.baseURL ?? DEFAULT_BASE_URL
     const refreshIntervalMs = o.refreshIntervalMs ?? DEFAULT_REFRESH_INTERVAL_MS
@@ -122,7 +125,8 @@ export default Plugin.define({
               ? "missing"
               : "expired"
             : "valid"
-        const out: { state: string; profile: string; expiresAt?: number } = { state, profile }
+        const out: { state: string; profile?: string; expiresAt?: number } = { state }
+        if (profile !== undefined) out.profile = profile
         if (s.expiresAt !== undefined) out.expiresAt = s.expiresAt
         return out
       },

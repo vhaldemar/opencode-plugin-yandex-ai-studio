@@ -21,9 +21,9 @@ export interface TokenState {
 }
 
 export type TokenEvent =
-  | { type: "auth.waiting"; profile: string; timeoutMs: number }
-  | { type: "auth.succeeded"; profile: string; expiresAt: number }
-  | { type: "auth.failed"; profile: string; reason: string; timedOut: boolean }
+  | { type: "auth.waiting"; profile?: string; timeoutMs: number }
+  | { type: "auth.succeeded"; profile?: string; expiresAt: number }
+  | { type: "auth.failed"; profile?: string; reason: string; timedOut: boolean }
 
 /** `yc` was killed because it did not produce a token in time. */
 export class YcTimeoutError extends Error {
@@ -63,7 +63,8 @@ export const DEFAULT_SAFETY_MS = 60 * 60 * 1000 // refresh 1h before expiry
 export const DEFAULT_REFRESH_INTERVAL_MS = 30 * 60 * 1000
 
 export interface TokenManagerOptions {
-  readonly profile: string
+  /** `yc` profile; when unset, `yc` runs without `--profile` (its active profile). */
+  readonly profile?: string
   readonly ycBin?: string
   readonly quietTimeoutMs?: number
   readonly interactiveTimeoutMs?: number
@@ -83,7 +84,7 @@ export interface TokenManagerHost {
 }
 
 export class TokenManager {
-  private readonly profile: string
+  private readonly profile: string | undefined
   private readonly ycBin: string
   private readonly quietTimeoutMs: number
   private readonly interactiveTimeoutMs: number
@@ -181,7 +182,9 @@ export class TokenManager {
   }
 
   /**
-   * Run `yc iam create-token --profile <profile>` and return the raw token.
+   * Run `yc iam create-token` and return the raw token. With no `profile`
+   * option the CLI runs without `--profile`, i.e. against yc's own active
+   * profile (`yc config profile get`), not an assumed "default".
    *
    * Two modes, distinguished by stderr markers:
    * - quiet: cached federation session, answers in ~1s; killed after quietTimeoutMs.
@@ -190,7 +193,10 @@ export class TokenManager {
    */
   private async runYc(): Promise<string> {
     const quietMs = this.quietTimeoutMs
-    const child = spawn(this.ycBin, ["iam", "create-token", "--profile", this.profile], {
+    // Display/диагностика: команда ровно в том виде, в котором она запускается.
+    const cli = this.profile === undefined ? `${this.ycBin} iam create-token` : `${this.ycBin} iam create-token --profile ${this.profile}`
+    const args = this.profile === undefined ? ["iam", "create-token"] : ["iam", "create-token", "--profile", this.profile]
+    const child = spawn(this.ycBin, args, {
       stdio: ["ignore", "pipe", "pipe"],
       env: cleanYcEnv(process.env),
     })
@@ -246,9 +252,9 @@ export class TokenManager {
       const reason = interactive
         ? `Yandex AI Studio: вход в браузере не был завершён за ${Math.round(this.interactiveTimeoutMs / 1000)} с. ` +
           `Выполните вход и повторите (команда /yc-auth или заново opencode). ` +
-          `Проверить вручную: ${this.ycBin} iam create-token --profile ${this.profile}`
+          `Проверить вручную: ${cli}`
         : `Yandex AI Studio: ${this.ycBin} iam create-token не ответил за ${Math.round(quietMs / 1000)} с (quiet-режим). ` +
-          `Проверьте установку yc и сеть: ${this.ycBin} iam create-token --profile ${this.profile}`
+          `Проверьте установку yc и сеть: ${cli}`
       this.lastError = new YcTimeoutError(reason, interactive)
       this.host.emit({
         type: "auth.failed",
@@ -262,7 +268,7 @@ export class TokenManager {
     const token = stdout.trim()
     if (code !== 0 || !token) {
       const reason =
-        `Yandex AI Studio: ${this.ycBin} iam create-token --profile ${this.profile} ` +
+        `Yandex AI Studio: ${cli} ` +
         `завершился с кодом ${code}${stderr.trim() ? `: ${stderr.trim().slice(0, 500)}` : ""}`
       this.lastError = new YcExitError(reason, code, stderr)
       this.host.emit({ type: "auth.failed", profile: this.profile, reason, timedOut: false })

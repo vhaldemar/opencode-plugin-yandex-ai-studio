@@ -24,9 +24,10 @@ export const YandexAuth = Rpc.define({
         properties: {
           state: { type: "string", enum: ["valid", "refreshing", "interactive", "expired", "missing", "failed"] },
           expiresAt: { type: "number" },
+          /** Undefined when the plugin runs without the `profile` option. */
           profile: { type: "string" },
         },
-        required: ["state", "profile"],
+        required: ["state"],
         additionalProperties: false,
       },
     },
@@ -97,10 +98,11 @@ export const YandexAuth = Rpc.define({
       schema: {
         type: "object",
         properties: {
+          /** Undefined when the plugin runs without the `profile` option. */
           profile: { type: "string" },
           timeoutMs: { type: "number" },
         },
-        required: ["profile", "timeoutMs"],
+        required: ["timeoutMs"],
         additionalProperties: false,
       },
     },
@@ -108,10 +110,11 @@ export const YandexAuth = Rpc.define({
       schema: {
         type: "object",
         properties: {
+          /** Undefined when the plugin runs without the `profile` option. */
           profile: { type: "string" },
           expiresAt: { type: "number" },
         },
-        required: ["profile", "expiresAt"],
+        required: ["expiresAt"],
         additionalProperties: false,
       },
     },
@@ -119,11 +122,12 @@ export const YandexAuth = Rpc.define({
       schema: {
         type: "object",
         properties: {
+          /** Undefined when the plugin runs without the `profile` option. */
           profile: { type: "string" },
           reason: { type: "string" },
           timedOut: { type: "boolean" },
         },
-        required: ["profile", "reason", "timedOut"],
+        required: ["reason", "timedOut"],
         additionalProperties: false,
       },
     },
