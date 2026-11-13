@@ -354,6 +354,13 @@ export default Plugin.define({
       refreshIntervalMs,
     )
 
+    // ---- periodic usage snapshot: keeps the TUI footer alive after restarts
+    // (the TUI part starts with an empty signal and learns the snapshot only
+    // from usage.updated events; force-emit every few minutes so a reloaded
+    // TUI recovers quickly without waiting for the next token tick) ----
+    const usageTimer =
+      usageEndpoint === undefined ? undefined : setInterval(() => void refreshUsage(true), 5 * 60_000)
+
     // ---- 401 rescue + 429 rate-limit backoff ----
     const retryHook = await ctx.session.hook("retry", async (event) => {
       if (event.model.providerID !== providerID) return
@@ -456,6 +463,7 @@ export default Plugin.define({
 
     return () => {
       clearInterval(timer)
+      if (usageTimer !== undefined) clearInterval(usageTimer)
       void retryHook.dispose()
     }
   },
