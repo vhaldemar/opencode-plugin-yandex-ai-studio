@@ -1,6 +1,6 @@
 import { Model, Plugin, Provider } from "@opencode/plugin"
 import { execFile } from "node:child_process"
-import { fetchCodexModels, fetchCodexUsage, fetchModels, ApiHttpError, type CodexCatalogModel, type CodexUsage } from "./models.js"
+import { fetchCodexModels, fetchCodexUsage, fetchModels, fetchSubscriptions, ApiHttpError, type CodexCatalogModel, type CodexUsage } from "./models.js"
 import { QUOTA_WARN_PERCENT, YandexAuth } from "./rpc.js"
 import {
   cleanYcEnv,
@@ -44,6 +44,13 @@ export interface Options {
   modelPrefixes?: string[]
   /** Subscription usage/rate-limit endpoint (`GET /api/codex/usage`). `null` disables quota tracking. */
   usageEndpoint?: string | null
+  /**
+   * User subscriptions endpoint (`GET /v1/subscriptions`, Bearer IAM token).
+   * Used to auto-discover the folder when `folderId` is not configured:
+   * the first active subscription wins (same as the Codex client).
+   * `null` disables the discovery.
+   */
+  subscriptionsEndpoint?: string | null
   /** Model ids exposed by the provider on top of the catalog. */
   models?: (string | { id: string; name?: string; context?: number })[]
   /** Refresh tick; the token is refreshed only when close to expiry. */
@@ -90,12 +97,9 @@ async function resolveFolderId(o: Options, profile: string | undefined, ycBin: s
       return folderId
     }
   } catch {
-    // Profiles without folder-id (pure federation auth) are normal.
+    // Profiles without folder-id (pure federation auth) are normal; the
+    // subscriptions API may still discover the folder once a token exists.
   }
-  console.warn(
-    `yandex-ai-studio: folderId не задан (ни в опциях, ни в профиле yc «${profile ?? "(активный)"}»). ` +
-      "API вернёт ошибку без заголовка OpenAI-Project; укажите опцию folderId.",
-  )
   return undefined
 }
 
@@ -111,8 +115,14 @@ export default Plugin.define({
     const refreshIntervalMs = o.refreshIntervalMs ?? DEFAULT_REFRESH_INTERVAL_MS
     const ycBin = o.ycBin ?? "yc"
 
-    /** Explicit option wins; otherwise fall back to the yc profile's folder-id. */
-    const folderId = await resolveFolderId(o, profile, ycBin)
+    /** Explicit option wins; otherwise fall back to the yc profile's folder-id
+     * (the subscriptions API discovery happens later, once a token exists). */
+    let folderId = await resolveFolderId(o, profile, ycBin)
+
+    const subscriptionsEndpoint =
+      o.subscriptionsEndpoint === null
+        ? undefined
+        : o.subscriptionsEndpoint ?? `${baseURL.replace(/\/+$/, "")}/subscriptions`
 
     // ---- RPC contract: auth events for the TUI part ----
     const rpc = await ctx.rpc.register(YandexAuth, {
@@ -355,6 +365,37 @@ export default Plugin.define({
       manager
         .ensure()
         .then(async () => {
+          // Folder auto-discovery via the subscriptions API (the way the
+          // Codex client picks its folder): explicit option always wins,
+          // otherwise the first active subscription's folder does.
+          if (subscriptionsEndpoint !== undefined && !o.folderId) {
+            try {
+              const token = manager.peek()
+              if (token) {
+                const subs = await fetchSubscriptions(subscriptionsEndpoint, token)
+                const first = subs.find((s) => s.folderId)
+                if (subs.length > 1) {
+                  console.warn(
+                    `yandex-ai-studio: у пользователя ${subs.length} активных подписок; взята первая — укажите folderId, если нужна другая`,
+                  )
+                }
+                if (first && folderId !== first.folderId) {
+                  console.log(
+                    `yandex-ai-studio: folder-id от подписки ${first.folderId} (тариф ${first.tariffId ?? "?"})`,
+                  )
+                  folderId = first.folderId
+                }
+              }
+            } catch (err) {
+              console.warn("yandex-ai-studio: subscriptions fetch failed:", (err as Error).message)
+            }
+          }
+          if (!folderId) {
+            console.warn(
+              "yandex-ai-studio: folderId не обнаружен (ни в опциях, ни в подписках, ни в профиле yc). " +
+                "API вернёт ошибку без заголовка OpenAI-Project; укажите опцию folderId.",
+            )
+          }
           if (
             (codexModelsEndpoint !== undefined || modelsEndpoint !== undefined) &&
             Date.now() - inventory.checkedAt > modelsCacheMs

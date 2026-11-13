@@ -124,6 +124,63 @@ export async function fetchCodexUsage(
 }
 
 /**
+ * User's active AI Studio subscriptions (`GET {baseURL}/subscriptions`,
+ * Bearer IAM token; no folder header — the handle resolves the caller).
+ * The current Codex client picks the first subscription the same way.
+ */
+export interface UserSubscription {
+  readonly id: string
+  readonly cloudId: string
+  readonly folderId: string
+  readonly organizationId?: string
+  readonly tariffId?: string
+}
+
+export async function fetchSubscriptions(
+  endpoint: string,
+  token: string,
+  opts: { timeoutMs?: number; signal?: AbortSignal } = {},
+): Promise<readonly UserSubscription[]> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 5_000)
+  const onAbort = () => controller.abort()
+  opts.signal?.addEventListener("abort", onAbort)
+  try {
+    const res = await fetch(endpoint, {
+      headers: {
+        authorization: `Bearer ${token}`,
+        accept: "application/json",
+      },
+      signal: controller.signal,
+    })
+    if (!res.ok) {
+      const body = await res.text().catch(() => "<no body>")
+      throw new ApiHttpError(`${endpoint} → HTTP ${res.status}: ${body.slice(0, 300)} (token=${token.slice(0, 6)}…)`, res.status)
+    }
+    interface Raw {
+      id?: string
+      cloud_id?: string
+      folder_id?: string
+      organization_id?: string
+      tariff_id?: string
+    }
+    const body = (await res.json()) as { subscriptions?: Raw[] }
+    return (body.subscriptions ?? [])
+      .map((s) => ({
+        id: String(s.id ?? ""),
+        cloudId: String(s.cloud_id ?? ""),
+        folderId: String(s.folder_id ?? ""),
+        organizationId: s.organization_id ?? undefined,
+        tariffId: s.tariff_id ?? undefined,
+      }))
+      .filter((s) => s.id.length > 0)
+  } finally {
+    clearTimeout(timer)
+    opts.signal?.removeEventListener("abort", onAbort)
+  }
+}
+
+/**
  * Fetch the curated model catalog from the Codex-compatible endpoint
  * (`GET {endpoint}` with `Authorization: Bearer <token>` and `x-folder-id`).
  * Response shape: `{ models: [{ slug, display_name, ... }] }`.

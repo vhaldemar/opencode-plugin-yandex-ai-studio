@@ -5,6 +5,7 @@
 ## Провайдер и transport
 
 - Провайдер регистрируется через `ctx.provider.transform` поверх пакета `@opencode/ai/providers/openai-compatible` (`baseURL: https://apps.ai.api.cloud.yandex.net/v1`, CNAME на `apps-ai-api.ml-rag.cloud.yandex.net`), IAM-токен уходит заголовком `Authorization: Bearer <token>`, folder — в `OpenAI-Project`. После каждого обновления токена вызывается `ctx.provider.reload()`, и transform пере-регистрирует провайдера со свежим `apiKey`.
+- **Folder-резолв:** явная опция → подписки пользователя (`GET /v1/subscriptions`, Bearer; первая активная — так же выбирает Codex) → `yc config get folder-id`. Отложенный резолв через подписки подхватывается `kickRefresh`'ем и фиксируется `provider.reload()`.
 - **Self-heal:** если листинг ответил 401/403 (например, токен в storage реально истёк раньше нашей оценки TTL), плагин принудительно вызывает `yc iam create-token`, минуя кэш и storage, и повторяет запрос; чат-запросы так же спасаются retry-хуком (одна попытка после 401).
 
 ## Токен (`src/token.ts`)

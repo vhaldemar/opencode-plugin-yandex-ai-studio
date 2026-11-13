@@ -62,7 +62,7 @@ opencode models             # yandex-ai-studio/... — модель из лис�
 ### Что задать в опциях обязательно
 
 - **`profile`** — опционален: если не указан, `yc iam create-token` вызывается **без** `--profile` и использует активный профиль yc (тот, что установлен через `yc config profile activate`). Если указываете — профиль должен иметь живую федеративную сессию.
-- **`folderId`** — для user IAM-токенов обязателен: без него API отвечает «folder ID has to be provided in OpenAI-Project header». Плагин пробует взять его из `yc config get folder-id [--profile]`; у федеративных профилей он часто пуст, тогда указывайте явно. Токен и folder должны быть из одного облака.
+- **`folderId`** — опционален. Цепочка резолва: явная опция → **подписки пользователя** (`GET {baseURL}/subscriptions` по IAM-токену — берётся folder первой активной подписки, как делает Codex; при нескольких подписках — предупреждение) → `yc config get folder-id`. WARN в логе будет только если не нашлось нигде. Указывайте явно, только если подписок несколько и нужна не первая, либо токен и folder из разных облаков.
 
 Для headless-режимов (`opencode run`, сервер без TUI) TUI-часть просто не грузится — серверная часть самодостаточна.
 
@@ -76,11 +76,12 @@ opencode models             # yandex-ai-studio/... — модель из лис�
 | `baseURL` | `https://apps.ai.api.cloud.yandex.net/v1` | база для всех endpoint'ов (apps-вход AI Studio); чат идёт в `{baseURL}/chat/completions` с folder в `OpenAI-Project` |
 | `codexModelsEndpoint` | `{baseURL}/models-codex` | ручка кураторского каталога (`x-folder-id`; `null` — отключить) |
 | `usageEndpoint` | `{baseURL}/api/codex/usage` | ручка квот подписки (`x-folder-id`; кэш 60 с) |
+| `subscriptionsEndpoint` | `{baseURL}/subscriptions` | подписки пользователя (Bearer, без folder-хедера); авто-резолв folderId по первой подписке; `null` — отключить |
 | `modelsEndpoint` | `{baseURL}/models` | ручка raw-листинга OpenAI (`OpenAI-Project`; `null` — отключить) |
 | `modelPrefixes` | `["gpt://"]` | фильтр raw-листинга: остаются только чат-совместимые `gpt://` id (эмбеддеры `emb://` и пр. отсекаются) |
 | `modelsCacheMs` | `600000` | срок жизни инвентаря моделей |
 | `providerID` | `"yandex-ai-studio"` | id провайдера в OpenCode |
-| `folderId` | из профиля `yc` (`config get folder-id`) | folder id для заголовка `OpenAI-Project` (обязателен для user IAM-токенов) |
+| `folderId` | опция → первая подписка → профиль yc | folder id для заголовка `OpenAI-Project`; явно нужен только при нескольких подписках |
 | `models` | `[]` (только листинг) | модели поверх листинга (`string` или `{id, name, context}`) |
 | `ycBin` | `"yc"` | путь к бинарнику `yc` |
 | `quietTimeoutMs` | `10000` | таймаут quiet-режима |
