@@ -1,7 +1,7 @@
 import { Model, Plugin, Provider } from "@opencode/plugin"
 import { execFile } from "node:child_process"
-import { fetchCodexModels, fetchCodexUsage, fetchModels, type CodexCatalogModel, type CodexUsage } from "./models.js"
-import { YandexAuth } from "./rpc.js"
+import { fetchCodexModels, fetchCodexUsage, fetchModels, ApiHttpError, type CodexCatalogModel, type CodexUsage } from "./models.js"
+import { QUOTA_WARN_PERCENT, YandexAuth } from "./rpc.js"
 import {
   cleanYcEnv,
   DEFAULT_REFRESH_INTERVAL_MS,
@@ -250,7 +250,11 @@ export default Plugin.define({
           try {
             fetched = await fetchAll()
           } catch (err) {
-            if (!/HTTP 40[13]/.test((err as Error).message)) throw err
+            // 401/403 from YC usually means the cached IAM token is stale even
+            // if our TTL math still considers it valid (restored from storage
+            // after the real token already expired). Self-heal: force a fresh
+            // `yc iam create-token` and retry both listings once.
+            if (!(err instanceof ApiHttpError) || (err.status !== 401 && err.status !== 403)) throw err
             token = (await manager.force()).token
             currentToken = token
             fetched = await fetchAll()
@@ -386,8 +390,9 @@ export default Plugin.define({
       if (!is401 && !is429) return
       if (is429) {
         // Ask the usage endpoint when the window resets and sleep until then
-        // (capped) instead of a blind exponential backoff.
-        void refreshUsage(true)
+        // (capped) instead of a blind exponential backoff. Await so the
+        // delay uses the *fresh* reset_after_seconds, not the last snapshot.
+        await refreshUsage(true)
         const snapshot = usage.snapshot
         const resetIn = snapshot?.resetAfterSeconds ?? 60
         const delay = Math.min(resetIn + 5, 15 * 60) * 1000

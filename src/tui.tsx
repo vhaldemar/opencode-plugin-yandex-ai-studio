@@ -1,6 +1,6 @@
 import { Plugin } from "@opencode/plugin/tui"
 import { createSignal } from "solid-js"
-import { YandexAuth } from "./rpc.js"
+import { QUOTA_WARN_PERCENT, YandexAuth } from "./rpc.js"
 
 /**
  * TUI part: surfaces the plugin auth lifecycle and subscription usage.
@@ -72,7 +72,7 @@ export default Plugin.define({
           message: `Лимит подписки исчерпан (${data.primaryPercent}% окна 5ч / ${data.secondaryPercent}% недели)`,
           variant: "error",
         })
-      } else if (data.primaryPercent >= 80) {
+      } else if (data.primaryPercent >= QUOTA_WARN_PERCENT) {
         context.ui.toast.show({
           title: "Yandex AI Studio",
           message: `Квота почти исчерпана: ${data.primaryPercent}% окна 5ч`,
@@ -88,7 +88,7 @@ export default Plugin.define({
       if (waiting()) return <text fg="yellow">YC[AUTH…]</text>
       const u = usage()
       if (!u) return null
-      const fg = u.primaryPercent >= 80 || u.secondaryPercent >= 80 ? "red" : "green"
+      const fg = u.primaryPercent >= QUOTA_WARN_PERCENT || u.secondaryPercent >= QUOTA_WARN_PERCENT ? "red" : "green"
       return (
         <text fg={fg}>
           YC[{u.primaryPercent}%/{u.secondaryPercent}%]

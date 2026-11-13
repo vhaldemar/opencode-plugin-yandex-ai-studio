@@ -1,4 +1,18 @@
 /**
+ * HTTP error from a Yandex AI Studio endpoint. Carries the status so callers
+ * (auth self-heal, 429 backoff) can branch on it instead of parsing the text.
+ */
+export class ApiHttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message)
+    this.name = "ApiHttpError"
+  }
+}
+
+/**
  * Normalized model entry from the Codex catalog
  * (`GET {baseURL}/models-codex`, folder via `x-folder-id` header).
  */
@@ -66,7 +80,7 @@ export async function fetchCodexUsage(
     })
     if (!res.ok) {
       const body = await res.text().catch(() => "<no body>")
-      throw new Error(`${endpoint} → HTTP ${res.status}: ${body.slice(0, 300)} (token=${token.slice(0, 6)}…)`)
+      throw new ApiHttpError(`${endpoint} → HTTP ${res.status}: ${body.slice(0, 300)} (token=${token.slice(0, 6)}…)`, res.status)
     }
     interface Window {
       used_percent?: number
@@ -139,7 +153,7 @@ export async function fetchCodexModels(
     if (!res.ok) {
       const body = await res.text().catch(() => "<no body>")
       // Never log the raw token: only its redacted prefix goes into the error.
-      throw new Error(`${endpoint} → HTTP ${res.status}: ${body.slice(0, 300)} (token=${token.slice(0, 6)}…)`)
+      throw new ApiHttpError(`${endpoint} → HTTP ${res.status}: ${body.slice(0, 300)} (token=${token.slice(0, 6)}…)`, res.status)
     }
     interface Raw {
       slug?: string
@@ -203,7 +217,7 @@ export async function fetchModels(
     if (!res.ok) {
       const body = await res.text().catch(() => "<no body>")
       // Never log the raw token: only its redacted prefix goes into the error.
-      throw new Error(`${endpoint} → HTTP ${res.status}: ${body.slice(0, 300)} (token=${token.slice(0, 6)}…)`)
+      throw new ApiHttpError(`${endpoint} → HTTP ${res.status}: ${body.slice(0, 300)} (token=${token.slice(0, 6)}…)`, res.status)
     }
     const body = (await res.json()) as { data?: { id?: string }[] }
     return (body.data ?? [])

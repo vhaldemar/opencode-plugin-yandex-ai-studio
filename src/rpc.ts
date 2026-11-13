@@ -1,6 +1,13 @@
 import { Rpc } from "@opencode/plugin/rpc"
 
 /**
+ * Single source of truth for the "quota almost exhausted" threshold, shared
+ * by the server (toasts logic in the usage command text) and the TUI part
+ * (toast + footer color). Must stay in sync with nothing else.
+ */
+export const QUOTA_WARN_PERCENT = 80
+
+/**
  * RPC contract of the Yandex AI Studio plugin.
  *
  * The server part emits these events during IAM token lifecycle; the TUI part
@@ -35,6 +42,7 @@ export const YandexAuth = Rpc.define({
           primaryResetAt: { type: "number" },
           secondaryResetAt: { type: "number" },
           limitReached: { type: "boolean" },
+          resetAfterSeconds: { type: "number" },
         },
         required: ["planType", "primaryPercent", "secondaryPercent", "limitReached"],
         additionalProperties: false,
@@ -58,6 +66,8 @@ export const YandexAuth = Rpc.define({
           primaryResetAt: { type: "number" },
           secondaryResetAt: { type: "number" },
           limitReached: { type: "boolean" },
+          /** Seconds until the exhausted window resets (absent = unknown). */
+          resetAfterSeconds: { type: "number" },
         },
         required: ["planType", "primaryPercent", "secondaryPercent", "limitReached"],
         additionalProperties: false,
