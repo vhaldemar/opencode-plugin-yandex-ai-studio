@@ -18,18 +18,24 @@ export default Plugin.define({
 
     // Show the last known usage snapshot immediately, before the first
     // usage.updated event arrives (it is emitted only on periodic refreshes).
-    auth
-      .usage({})
-      .then((snapshot) => {
-        const s = snapshot as unknown as
-          | { primaryPercent: number; secondaryPercent: number }
-          | null
-          | undefined
-        if (s) {
-          setUsage({ primaryPercent: s.primaryPercent, secondaryPercent: s.secondaryPercent })
-        }
-      })
-      .catch(() => {})
+    // Retry a few times: the very first call can race the server-side plugin
+    // still loading in a freshly spawned location (it answers 400).
+    const fetchUsage = (attempt: number) =>
+      auth
+        .usage({})
+        .then((snapshot) => {
+          const s = snapshot as unknown as
+            | { primaryPercent: number; secondaryPercent: number }
+            | null
+            | undefined
+          if (s) {
+            setUsage({ primaryPercent: s.primaryPercent, secondaryPercent: s.secondaryPercent })
+          }
+        })
+        .catch(() => {
+          if (attempt < 4) setTimeout(() => void fetchUsage(attempt + 1), 1000 * attempt)
+        })
+    void fetchUsage(0)
 
     const notify = (title: string, message: string) =>
       void context.attention
