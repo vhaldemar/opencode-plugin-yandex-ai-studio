@@ -16,6 +16,10 @@ export interface CodexCatalogModel {
   readonly visible: boolean
   /** The model can be called via the API (in chat requests). */
   readonly supportedInApi: boolean
+  /** Thinking efforts supported by the model (`supported_reasoning_levels`). */
+  readonly efforts: readonly { effort: string; description: string }[]
+  /** The catalog's default thinking effort, when reported. */
+  readonly defaultEffort?: string
 }
 
 export interface RemoteModel {
@@ -144,6 +148,8 @@ export async function fetchCodexModels(
       input_modalities?: string[]
       visibility?: string
       supported_in_api?: boolean
+      supported_reasoning_levels?: { effort?: string; description?: string }[]
+      default_reasoning_level?: string
     }
     const body = (await res.json()) as { models?: Raw[] }
     return (body.models ?? [])
@@ -158,6 +164,10 @@ export async function fetchCodexModels(
         vision: (m.input_modalities ?? []).includes("image"),
         visible: m.visibility !== "hidden",
         supportedInApi: m.supported_in_api !== false,
+        efforts: (m.supported_reasoning_levels ?? [])
+          .filter((lvl) => (lvl.effort ?? "").length > 0)
+          .map((lvl) => ({ effort: String(lvl.effort), description: lvl.description ?? "" })),
+        defaultEffort: m.default_reasoning_level ?? undefined,
       }))
   } finally {
     clearTimeout(timer)

@@ -32,6 +32,8 @@
 - `/yc-auth` — принудительный refresh токена + synthetic-сообщение с результатом в сессию.
 - `/yc-usage` — сводка по квотам подписки (план, % окна 5ч/7д, время сброса) сообщением в сессию.
 
+Thinking efforts: из кураторского каталога тянется `supported_reasoning_levels` (+ `default_reasoning_level`). Базовая модель равна дефолтному effort'у; каждый другой effort экспонируется как вариант `provider/<model>#<effort>` — вариант кладёт `reasoning_effort` в тело chat-запроса (например `yandex-ai-studio/gpt://<folder>/glm-5.2/latest#high`). Reasoning-контент моделей приходит в `reasoning_content` и отображается нативно.
+
 Квоты берутся из codex-ручки `GET {baseURL}/api/codex/usage` (folder через `x-folder-id`, кэш 60 с) и обновляются в фоне вместе с инвентарём моделей. При **429** (rate limit) retry-хук читает `reset_after_seconds` и ставит задержку повтора до момента сброса окна (с запасом 5 с, капа 15 мин) вместо слепого экспоненциального backoff.
 
 ## Конфигурация

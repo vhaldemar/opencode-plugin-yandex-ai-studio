@@ -274,6 +274,22 @@ export default Plugin.define({
             }
             if (m.context) model.limit.context = m.context
             model.capabilities.input = m.vision ? ["text", "image"] : ["text"]
+            // Thinking efforts from the catalog: the base model uses the
+            // catalog default; every other effort becomes a model variant
+            // (`provider/<model>#<effort>`) that sends `reasoning_effort`.
+            const defaultEffort = m.defaultEffort && m.efforts.some((e) => e.effort === m.defaultEffort) ? m.defaultEffort : undefined
+            const variantEfforts = m.efforts
+              .map((e) => e.effort)
+              .filter((effort) => effort !== defaultEffort)
+            if (variantEfforts.length > 0) {
+              // `Model.Info.default` is statically typed with `variants: never[]`;
+              // the runtime shape matches `Model.Variant` ({ id, body }).
+              ;(model as unknown as { variants: { id: string; body: Record<string, unknown> }[] }).variants =
+                variantEfforts.map((effort) => ({
+                  id: effort,
+                  body: { reasoning_effort: effort },
+                }))
+            }
             return model
           })
           const extraModels = remote
