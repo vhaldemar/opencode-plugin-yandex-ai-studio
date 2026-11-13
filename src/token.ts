@@ -1,5 +1,20 @@
 import { spawn } from "node:child_process"
 
+/**
+ * `yc` prioritizes credential env vars (`YC_API_KEY`, `YC_TOKEN`, …) over the
+ * profile config. OpenCode servers often inherit such vars (e.g. the API key
+ * configured for another provider), which silently switches `iam create-token`
+ * to a service-account token. Strip credential vars so the token always comes
+ * from the requested `--profile`.
+ */
+export function cleanYcEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const out: Record<string, string | undefined> = { ...env }
+  for (const key of ["YC_API_KEY", "YC_TOKEN", "YC_IAM_TOKEN", "YC_SERVICE_ACCOUNT_KEY_FILE", "YC_SERVICE_ACCOUNT_KEY"]) {
+    delete out[key]
+  }
+  return out as NodeJS.ProcessEnv
+}
+
 export interface TokenState {
   readonly token: string
   readonly expiresAt: number
@@ -78,6 +93,7 @@ export class TokenManager {
 
   private state: TokenState | undefined
   private inflight: Promise<TokenState> | undefined
+  private ignoreStorage = false
   private lastError: Error | undefined
 
   constructor(options: TokenManagerOptions, host: TokenManagerHost) {
@@ -121,6 +137,9 @@ export class TokenManager {
   /** Force a refresh even when the cache is still valid. */
   async force(): Promise<TokenState> {
     this.state = undefined
+    // The stored token may be the stale one we are rejecting right now:
+    // skip the storage fallback once so ensure() really calls `yc`.
+    this.ignoreStorage = true
     return this.ensure()
   }
 
@@ -134,7 +153,11 @@ export class TokenManager {
   }
 
   private async doEnsure(): Promise<TokenState> {
-    if (this.state === undefined) {
+    const skipStorage = this.ignoreStorage
+    this.ignoreStorage = false
+    if (this.state !== undefined) {
+      if (this.isValid(this.state)) return this.state
+    } else if (!skipStorage) {
       const stored = await this.host.load()
       if (stored && stored.token) {
         this.state = stored
@@ -142,11 +165,10 @@ export class TokenManager {
           this.host.log("token loaded from storage", { expiresAt: stored.expiresAt })
           return stored
         }
+        this.state = undefined
         // Stored token is close to expiry: fall through to a fresh `yc` call
         // (it is cheap and silent while the yc session is alive).
       }
-    } else if (this.isValid(this.state)) {
-      return this.state
     }
 
     const token = await this.runYc()
@@ -170,6 +192,7 @@ export class TokenManager {
     const quietMs = this.quietTimeoutMs
     const child = spawn(this.ycBin, ["iam", "create-token", "--profile", this.profile], {
       stdio: ["ignore", "pipe", "pipe"],
+      env: cleanYcEnv(process.env),
     })
 
     let stdout = ""

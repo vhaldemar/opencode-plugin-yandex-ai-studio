@@ -3,6 +3,7 @@ import { execFile } from "node:child_process"
 import { fetchModels } from "./models.js"
 import { YandexAuth } from "./rpc.js"
 import {
+  cleanYcEnv,
   DEFAULT_REFRESH_INTERVAL_MS,
   DEFAULT_SAFETY_MS,
   DEFAULT_TOKEN_TTL_MS,
@@ -69,7 +70,7 @@ async function resolveFolderId(o: Options, profile: string, ycBin: string): Prom
       execFile(
         ycBin,
         ["config", "get", "folder-id", "--profile", profile],
-        { timeout: 5_000 },
+        { timeout: 5_000, env: cleanYcEnv(process.env) },
         (err, stdout) => (err ? reject(err) : resolve(stdout)),
       )
     })
@@ -182,10 +183,21 @@ export default Plugin.define({
     const refreshModels = () => {
       if (modelsEndpoint === undefined) return Promise.resolve()
       inventoryInflight ??= (async () => {
-        const token = manager.peek() ?? stored?.token
+        let token = manager.peek() ?? stored?.token
         if (!token) return
         try {
-          const remote = await fetchModels(modelsEndpoint, token, { folderId })
+          // 401/403 from YC usually means the cached IAM token is stale even
+          // if our TTL math still considers it valid (restored from storage
+          // after the real token already expired). Self-heal: force a fresh
+          // `yc iam create-token` and retry the listing once.
+          let remote: readonly { id: string; owned_by?: string }[]
+          try {
+            remote = await fetchModels(modelsEndpoint, token, { folderId })
+          } catch (err) {
+            if (!/HTTP 40[13]/.test((err as Error).message)) throw err
+            token = (await manager.force()).token
+            remote = await fetchModels(modelsEndpoint, token, { folderId })
+          }
           // Listing ids embed the folder (gpt://<folder>/<name>/latest) and the
           // API scopes them to the OpenAI-Project folder. A different folder in
           // the ids means a config mixup (token or header from another cloud).

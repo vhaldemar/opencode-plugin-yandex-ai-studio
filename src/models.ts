@@ -26,7 +26,10 @@ export async function fetchModels(
       },
       signal: controller.signal,
     })
-    if (!res.ok) throw new Error(`${endpoint} → HTTP ${res.status}`)
+    if (!res.ok) {
+      const body = await res.text().catch(() => "<no body>")
+      throw new Error(`${endpoint} → HTTP ${res.status}: ${body.slice(0, 300)} (token=${token.slice(0, 6)}…)`)
+    }
     const body = (await res.json()) as { data?: { id?: string; owned_by?: string }[] }
     return (body.data ?? [])
       .map((m) => ({ id: String(m.id), owned_by: m.owned_by }))
