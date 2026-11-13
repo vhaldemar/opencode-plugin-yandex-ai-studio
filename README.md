@@ -4,7 +4,7 @@
 
 ## Как работает
 
-- Провайдер регистрируется через `ctx.provider.transform` поверх пакета `@opencode/ai/providers/openai-compatible` (`baseURL: https://ai.api.cloud.yandex.net/v1`), IAM-токен уходит заголовком `Authorization: Bearer <token>`, folder — в `OpenAI-Project`. После каждого обновления токена вызывается `ctx.provider.reload()`, и transform пере-регистрирует провайдера со свежим `apiKey`.
+- Провайдер регистрируется через `ctx.provider.transform` поверх пакета `@opencode/ai/providers/openai-compatible` (`baseURL: https://apps.ai.api.cloud.yandex.net/v1`, CNAME на `apps-ai-api.ml-rag.cloud.yandex.net`), IAM-токен уходит заголовком `Authorization: Bearer <token>`, folder — в `OpenAI-Project`. После каждого обновления токена вызывается `ctx.provider.reload()`, и transform пере-регистрирует провайдера со свежим `apiKey`.
 - **Self-heal:** если листинг ответил 401/403 (например, токен в storage реально истёк раньше нашей оценки TTL), плагин принудительно вызывает `yc iam create-token`, минуя кэш и storage, и повторяет запрос; чат-запросы так же спасаются retry-хуком (одна попытка после 401).
 - Список моделей подтягивается из codex-ручки `GET {baseURL}/models-codex` (кэш 10 минут, single-flight, последний успешный инвентарь переживает сбои). Это тот же кураторский каталог, что отдаётся Codex CLI: только чат-модели, готовые `display_name`, реальный `context_window`, признак image-входа; фильтруются записи с `visibility != "list"` или `supported_in_api == false`. Ручка отдаёт только `slug`, поэтому modelID конструируется как `gpt://<folder>/<slug>/latest` (формат совпадает с id из OpenAI-листинга). Модели из опции `models` объединяются с каталогом и имеют приоритет.
 - Токен кэшируется в plugin storage с TTL 12 ч; за час до истечения планово обновляется (тик раз в 30 минут).
@@ -88,7 +88,7 @@ opencode models             # yandex-ai-studio/... — модель из лис�
 | Опция | По умолчанию | Описание |
 |---|---|---|
 | `profile` | `"default"` | профиль `yc` для `iam create-token` |
-| `baseURL` | `https://ai.api.cloud.yandex.net/v1` | endpoint OpenAI-compatible API (AI Studio) |
+| `baseURL` | `https://apps.ai.api.cloud.yandex.net/v1` | endpoint OpenAI-compatible API (apps-вход AI Studio) |
 | `modelsEndpoint` | `{baseURL}/models` | ручка листинга моделей (`null` — отключить листинг) |
 | `modelPrefixes` | `["gpt://"]` | фильтр листинга: id моделей с этими префиксами (эмбеддинги/realtime отсекаются) |
 | `modelsCacheMs` | `600000` | срок жизни листинга |

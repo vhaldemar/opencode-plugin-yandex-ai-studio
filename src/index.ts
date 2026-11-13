@@ -43,7 +43,7 @@ export interface Options {
   safetyMs?: number
 }
 
-const DEFAULT_BASE_URL = "https://ai.api.cloud.yandex.net/v1"
+const DEFAULT_BASE_URL = "https://apps.ai.api.cloud.yandex.net/v1"
 const DEFAULT_MODELS_CACHE_MS = 10 * 60 * 1000
 
 const STORAGE_KEY = "iam-token"
