@@ -3,17 +3,18 @@ import { createSignal } from "solid-js"
 import { YandexAuth } from "./rpc.js"
 
 /**
- * TUI part: surfaces the plugin auth lifecycle.
+ * TUI part: surfaces the plugin auth lifecycle and subscription usage.
  *
  * - OS notification when `yc` opens the browser (you might be in another window)
- * - toast on waiting / success / failure
- * - persistent footer indicator while the interactive login is pending
+ * - toast on waiting / success / failure / rate limit
+ * - persistent footer indicator: YC[AUTH…] while logging in, YC[p%/w%] otherwise
  */
 export default Plugin.define({
   id: "yandex-ai-studio.tui",
   setup(context) {
     const auth = context.client.rpc(YandexAuth)
     const [waiting, setWaiting] = createSignal(false)
+    const [usage, setUsage] = createSignal<{ primaryPercent: number; secondaryPercent: number } | undefined>()
 
     const notify = (title: string, message: string) =>
       void context.attention
@@ -56,16 +57,52 @@ export default Plugin.define({
       }
     })
 
-    // Persistent status in the footer while waiting for the browser login.
+    const stopUsage = auth.events.on("usage.updated", (event) => {
+      const data = event.data as {
+        planType: string
+        primaryPercent: number
+        secondaryPercent: number
+        limitReached: boolean
+        primaryResetAt?: number
+      }
+      setUsage({ primaryPercent: data.primaryPercent, secondaryPercent: data.secondaryPercent })
+      if (data.limitReached) {
+        context.ui.toast.show({
+          title: "Yandex AI Studio",
+          message: `Лимит подписки исчерпан (${data.primaryPercent}% окна 5ч / ${data.secondaryPercent}% недели)`,
+          variant: "error",
+        })
+      } else if (data.primaryPercent >= 80) {
+        context.ui.toast.show({
+          title: "Yandex AI Studio",
+          message: `Квота почти исчерпана: ${data.primaryPercent}% окна 5ч`,
+          variant: "warning",
+        })
+      }
+    })
+
+    // Persistent status in the footer: waiting for the browser login, or the
+    // usage snapshot once known (primary window % / weekly window %).
     context.ui.slot({
       append: "home.footer.status",
-      render: () => (waiting() ? <text fg="yellow">YC[AUTH…]</text> : null),
+      render: () => {
+        if (waiting()) return <text fg="yellow">YC[AUTH…]</text>
+        const u = usage()
+        if (!u) return null
+        const fg = u.primaryPercent >= 80 || u.secondaryPercent >= 80 ? "red" : "green"
+        return (
+          <text fg={fg}>
+            YC[{u.primaryPercent}%/{u.secondaryPercent}%]
+          </text>
+        )
+      },
     })
 
     return () => {
       stop()
       stopSucceeded()
       stopFailed()
+      stopUsage()
       setWaiting(false)
     }
   },

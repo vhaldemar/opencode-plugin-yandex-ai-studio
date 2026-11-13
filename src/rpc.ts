@@ -26,6 +26,27 @@ export const YandexAuth = Rpc.define({
   },
   events: {
     /**
+     * Subscription usage/rate limits refreshed (from /v1/api/codex/usage).
+     * Percentages are per window: primary = the rolling short window,
+     * secondary = the weekly window.
+     */
+    "usage.updated": {
+      schema: {
+        type: "object",
+        properties: {
+          planType: { type: "string" },
+          primaryPercent: { type: "number" },
+          secondaryPercent: { type: "number" },
+          /** Unix ms when the primary window resets (absent = unknown). */
+          primaryResetAt: { type: "number" },
+          secondaryResetAt: { type: "number" },
+          limitReached: { type: "boolean" },
+        },
+        required: ["planType", "primaryPercent", "secondaryPercent", "limitReached"],
+        additionalProperties: false,
+      },
+    },
+    /**
      * `yc` opened a browser for re-authorization and is blocking until
      * the user completes login (up to `timeoutMs`).
      */

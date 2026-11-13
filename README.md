@@ -19,13 +19,20 @@
 
 ### UX
 
-| Событие | Toast | Футер `YC[AUTH…]` | OS-нотификация |
+| Событие | Toast | Футер | OS-нотификация |
 |---|---|---|---|
-| Ждём браузер (до 5 мин) | warning | ✔ | ✔ |
+| Ждём браузер (до 5 мин) | warning | `YC[AUTH…]` (жёлтый) | ✔ |
 | Токен обновлён | success | — | — |
 | Ошибка / таймаут | error | — | ✔ (при таймауте) |
+| Квота: usage-снапшот получен | — | `YC[1%/4%]` (зелёный; красный при ≥80%) | — |
+| Квота ≥80% окна 5ч | warning | — | — |
+| Лимит подписки исчерпан | error | — | — |
 
-Команда `/yc-auth` — принудительный refresh + synthetic-сообщение с результатом в сессию.
+Команды:
+- `/yc-auth` — принудительный refresh токена + synthetic-сообщение с результатом в сессию.
+- `/yc-usage` — сводка по квотам подписки (план, % окна 5ч/7д, время сброса) сообщением в сессию.
+
+Квоты берутся из codex-ручки `GET {baseURL}/api/codex/usage` (folder через `x-folder-id`, кэш 60 с) и обновляются в фоне вместе с инвентарём моделей. При **429** (rate limit) retry-хук читает `reset_after_seconds` и ставит задержку повтора до момента сброса окна (с запасом 5 с, капа 15 мин) вместо слепого экспоненциального backoff.
 
 ## Конфигурация
 
@@ -93,6 +100,7 @@ opencode models             # yandex-ai-studio/... — модель из лис�
 | `profile` | `"default"` | профиль `yc` для `iam create-token` |
 | `baseURL` | `https://apps.ai.api.cloud.yandex.net/v1` | база для всех endpoint'ов (apps-вход AI Studio); чат идёт в `{baseURL}/chat/completions` с folder в `OpenAI-Project` |
 | `codexModelsEndpoint` | `{baseURL}/models-codex` | ручка кураторского каталога (`x-folder-id`; `null` — отключить) |
+| `usageEndpoint` | `{baseURL}/api/codex/usage` | ручка квот подписки (`x-folder-id`; кэш 60 с) |
 | `modelsEndpoint` | `{baseURL}/models` | ручка raw-листинга OpenAI (`OpenAI-Project`; `null` — отключить) |
 | `modelPrefixes` | `["gpt://"]` | фильтр raw-листинга: остаются только чат-совместимые `gpt://` id (эмбеддеры `emb://` и пр. отсекаются) |
 | `modelsCacheMs` | `600000` | срок жизни инвентаря моделей |

@@ -23,6 +23,89 @@ export interface RemoteModel {
 }
 
 /**
+ * Subscription usage/rate limits from the Codex endpoint
+ * (`GET {baseURL}/api/codex/usage`, folder via `x-folder-id`).
+ */
+export interface CodexUsage {
+  readonly planType: string
+  readonly primaryPercent: number
+  readonly secondaryPercent: number
+  readonly primaryResetAt?: number
+  readonly secondaryResetAt?: number
+  /** True when a rate limit window is exhausted (requests will 429). */
+  readonly limitReached: boolean
+  /** Seconds until the exhausted window resets; for the retry backoff. */
+  readonly resetAfterSeconds?: number
+}
+
+/**
+ * Fetch the subscription usage snapshot. Used for quota display and to
+ * schedule a smart retry after a 429.
+ */
+export async function fetchCodexUsage(
+  endpoint: string,
+  token: string,
+  opts: { timeoutMs?: number; signal?: AbortSignal; folderId?: string } = {},
+): Promise<CodexUsage> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 5_000)
+  const onAbort = () => controller.abort()
+  opts.signal?.addEventListener("abort", onAbort)
+  try {
+    const res = await fetch(endpoint, {
+      headers: {
+        authorization: `Bearer ${token}`,
+        accept: "application/json",
+        ...(opts.folderId ? { "x-folder-id": opts.folderId } : {}),
+      },
+      signal: controller.signal,
+    })
+    if (!res.ok) {
+      const body = await res.text().catch(() => "<no body>")
+      throw new Error(`${endpoint} → HTTP ${res.status}: ${body.slice(0, 300)} (token=${token.slice(0, 6)}…)`)
+    }
+    interface Window {
+      used_percent?: number
+      reset_after_seconds?: number
+      reset_at?: number
+    }
+    interface Raw {
+      plan_type?: string
+      rate_limit?: {
+        allowed?: boolean
+        limit_reached?: boolean
+        primary_window?: Window
+        secondary_window?: Window
+      }
+    }
+    const body = (await res.json()) as Raw
+    const rate = body.rate_limit
+    const pct = (w?: Window) => (typeof w?.used_percent === "number" ? Math.max(0, Math.min(100, w.used_percent)) : 0)
+    const limitReached = rate?.limit_reached === true || rate?.allowed === false
+    // Prefer the window that is exhausted; otherwise the stricter (larger) one.
+    const resetSource =
+      rate?.primary_window?.reset_after_seconds && rate?.primary_window.used_percent === 100
+        ? rate.primary_window
+        : rate?.secondary_window
+    return {
+      planType: body.plan_type ?? "unknown",
+      primaryPercent: pct(rate?.primary_window),
+      secondaryPercent: pct(rate?.secondary_window),
+      primaryResetAt:
+        typeof rate?.primary_window?.reset_at === "number" ? rate.primary_window.reset_at * 1000 : undefined,
+      secondaryResetAt:
+        typeof rate?.secondary_window?.reset_at === "number" ? rate.secondary_window.reset_at * 1000 : undefined,
+      limitReached,
+      resetAfterSeconds:
+        typeof resetSource?.reset_after_seconds === "number" ? resetSource.reset_after_seconds : undefined,
+    }
+  } finally {
+    clearTimeout(timer)
+    opts.signal?.removeEventListener("abort", onAbort)
+  }
+}
+
+/**
  * Fetch the curated model catalog from the Codex-compatible endpoint
  * (`GET {endpoint}` with `Authorization: Bearer <token>` and `x-folder-id`).
  * Response shape: `{ models: [{ slug, display_name, ... }] }`.

@@ -1,6 +1,6 @@
 import { Model, Plugin, Provider } from "@opencode/plugin"
 import { execFile } from "node:child_process"
-import { fetchCodexModels, fetchModels, type CodexCatalogModel } from "./models.js"
+import { fetchCodexModels, fetchCodexUsage, fetchModels, type CodexCatalogModel, type CodexUsage } from "./models.js"
 import { YandexAuth } from "./rpc.js"
 import {
   cleanYcEnv,
@@ -42,6 +42,8 @@ export interface Options {
   modelsCacheMs?: number
   /** Filter for the raw OpenAI listing: only ids with one of these prefixes. */
   modelPrefixes?: string[]
+  /** Subscription usage/rate-limit endpoint (`GET /api/codex/usage`). `null` disables quota tracking. */
+  usageEndpoint?: string | null
   /** Model ids exposed by the provider on top of the catalog. */
   models?: (string | { id: string; name?: string; context?: number })[]
   /** Refresh tick; the token is refreshed only when close to expiry. */
@@ -176,6 +178,34 @@ export default Plugin.define({
     const modelPrefixes = o.modelPrefixes ?? DEFAULT_MODEL_PREFIXES
     const modelsCacheMs = o.modelsCacheMs ?? DEFAULT_MODELS_CACHE_MS
 
+    // ---- usage/rate limits (codex /api/codex/usage) ----
+    const usageEndpoint =
+      o.usageEndpoint === null
+        ? undefined
+        : o.usageEndpoint ?? `${baseURL.replace(/\/+$/, "")}/api/codex/usage`
+    const usageCacheMs = 60_000
+    const usage = { snapshot: undefined as CodexUsage | undefined, checkedAt: 0, inflight: undefined as Promise<void> | undefined }
+    const refreshUsage = (force = false) => {
+      if (usageEndpoint === undefined) return Promise.resolve()
+      if (!force && Date.now() - usage.checkedAt < usageCacheMs) return Promise.resolve()
+      usage.inflight ??= (async () => {
+        try {
+          const token = manager.peek() ?? stored?.token
+          if (!token) return
+          const snapshot = await fetchCodexUsage(usageEndpoint, token, { folderId })
+          usage.snapshot = snapshot
+          usage.checkedAt = Date.now()
+          await rpc.events.emit("usage.updated", snapshot as never).catch(() => {})
+        } catch (err) {
+          // Usage is advisory only; never surface it as an error.
+          console.warn("yandex-ai-studio: usage fetch failed:", (err as Error).message)
+        } finally {
+          usage.inflight = undefined
+        }
+      })()
+      return usage.inflight
+    }
+
     /** Configured specs take precedence over remotely discovered ids. */
     const configured = (o.models ?? []).map((spec) => {
       const entry = typeof spec === "string" ? { id: spec } : spec
@@ -306,6 +336,7 @@ export default Plugin.define({
           ) {
             await refreshModels()
           }
+          void refreshUsage()
           await ctx.provider.reload()
         })
         .catch((err: Error) => {
@@ -322,12 +353,26 @@ export default Plugin.define({
       refreshIntervalMs,
     )
 
-    // ---- 401 rescue: join the in-flight refresh, then retry once reloaded ----
+    // ---- 401 rescue + 429 rate-limit backoff ----
     const retryHook = await ctx.session.hook("retry", async (event) => {
       if (event.model.providerID !== providerID) return
-      const is401 =
-        event.error.status === 401 || /401|unauthorized/i.test(event.error.message ?? "")
-      if (!is401) return
+      const message = event.error.message ?? ""
+      const is401 = event.error.status === 401 || /401|unauthorized/i.test(message)
+      const is429 = event.error.status === 429 || /429|rate.?limit/i.test(message)
+      if (!is401 && !is429) return
+      if (is429) {
+        // Ask the usage endpoint when the window resets and sleep until then
+        // (capped) instead of a blind exponential backoff.
+        void refreshUsage(true)
+        const snapshot = usage.snapshot
+        const resetIn = snapshot?.resetAfterSeconds ?? 60
+        const delay = Math.min(resetIn + 5, 15 * 60) * 1000
+        console.warn(
+          `yandex-ai-studio: rate limit reached (primary ${snapshot?.primaryPercent}%, weekly ${snapshot?.secondaryPercent}%); retry in ${Math.round(delay / 1000)}s`,
+        )
+        event.decision = { retry: true, delay }
+        return
+      }
       if (event.attempt >= 3) {
         event.decision = { retry: false }
         return
@@ -347,6 +392,39 @@ export default Plugin.define({
         event.decision = { retry: false }
         console.error("yandex-ai-studio: refresh during retry failed:", (err as Error).message)
       }
+    })
+
+    // ---- /yc-usage command: subscription quota snapshot ----
+    const fmtWindow = (label: string, percent: number, resetAt?: number) => {
+      const reset = resetAt ? `, сброс ${new Date(resetAt).toLocaleString()}` : ""
+      return `${label}: ${percent}%${reset}`
+    }
+    await ctx.command.transform((editor) => {
+      editor.add({
+        name: "yc-usage",
+        description: "Show Yandex AI Studio subscription usage and rate limits",
+        execute: async ({ sessionID }) => {
+          let text: string
+          try {
+            await refreshUsage(true)
+            const u = usage.snapshot
+            if (!u) {
+              text = "❌ Yandex AI Studio: не удалось получить данные о квотах"
+            } else {
+              const warn = u.limitReached ? "⚠️ Лимит исчерпан!\n" : ""
+              text =
+                `📊 Yandex AI Studio (план ${u.planType})\n` +
+                warn +
+                fmtWindow("Окно 5ч", u.primaryPercent, u.primaryResetAt) +
+                "\n" +
+                fmtWindow("Окно 7д", u.secondaryPercent, u.secondaryResetAt)
+            }
+          } catch (err) {
+            text = `❌ Yandex AI Studio: ${(err as Error).message}`
+          }
+          await ctx.session.synthetic({ sessionID, text })
+        },
+      })
     })
 
     // ---- /yc-auth command: manual forced refresh ----
