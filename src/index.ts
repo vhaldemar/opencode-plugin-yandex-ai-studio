@@ -32,6 +32,8 @@ export interface Options {
   modelsEndpoint?: string | null
   /** How long a fetched model list stays valid. */
   modelsCacheMs?: number
+  /** Filter for listing: only ids with one of these prefixes (chat models). */
+  modelPrefixes?: string[]
   /** Model ids exposed by the provider. */
   models?: (string | { id: string; name?: string; context?: number })[]
   /** Refresh tick; the token is refreshed only when close to expiry. */
@@ -42,8 +44,16 @@ export interface Options {
   safetyMs?: number
 }
 
-const DEFAULT_BASE_URL = "https://llm.api.cloud.yandex.net/v1"
+const DEFAULT_BASE_URL = "https://ai.api.cloud.yandex.net/v1"
 const DEFAULT_MODELS_CACHE_MS = 10 * 60 * 1000
+/** Only chat-capable `gpt://` URIs; the listing also returns embedders etc. */
+const DEFAULT_MODEL_PREFIXES = ["gpt://"]
+
+/** `gpt://<folder>/<name>/latest` → `<name>`; plain ids pass through. */
+function shortModelName(id: string): string {
+  const stripped = id.replace(/^[a-z]+:\/\/[^/]+\//, "").replace(/\/latest$/, "")
+  return stripped.length > 0 ? stripped : id
+}
 
 const STORAGE_KEY = "iam-token"
 
@@ -167,6 +177,7 @@ export default Plugin.define({
     // Remote inventory: fetched from the OpenAI-compatible `/models` endpoint
     // with the IAM token, cached, single-flight, keeps the last good list.
     const inventory = { models: [] as typeof configured, checkedAt: 0 }
+    const modelPrefixes = o.modelPrefixes ?? DEFAULT_MODEL_PREFIXES
     let inventoryInflight: Promise<void> | undefined
     const refreshModels = () => {
       if (modelsEndpoint === undefined) return Promise.resolve()
@@ -175,13 +186,15 @@ export default Plugin.define({
         if (!token) return
         try {
           const remote = await fetchModels(modelsEndpoint, token, { folderId })
+          const usable = remote.filter((m) => modelPrefixes.some((p) => m.id.startsWith(p)))
           if (remote.length > 0) {
             const seen = new Set(configured.map((m) => String(m.id)))
-            inventory.models = remote
+            inventory.models = usable
               .filter((m) => !seen.has(m.id))
               .map((m) => ({
                 ...Model.Info.default(providerID, Model.ID.make(m.id)),
-                name: m.id,
+                // gpt://<folder>/<name>/latest → <name>
+                name: shortModelName(m.id),
               }))
             inventory.checkedAt = Date.now()
           }

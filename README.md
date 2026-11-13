@@ -36,7 +36,7 @@
       "package": "/home/lipkin/repos/opencode-plugin-yandex-ai-studio",
       "options": {
         "profile": "sandbox-fed",
-        "//": "folderId можно не указывать, если у профиля yc есть folder-id",
+        "folderId": "b1ghsjum2v37c2un8h64",
         "models": []
       }
       }
@@ -52,8 +52,9 @@
 | Опция | По умолчанию | Описание |
 |---|---|---|
 | `profile` | `"default"` | профиль `yc` для `iam create-token` |
-| `baseURL` | `https://llm.api.cloud.yandex.net/v1` | endpoint OpenAI-compatible API |
+| `baseURL` | `https://ai.api.cloud.yandex.net/v1` | endpoint OpenAI-compatible API (AI Studio) |
 | `modelsEndpoint` | `{baseURL}/models` | ручка листинга моделей (`null` — отключить листинг) |
+| `modelPrefixes` | `["gpt://"]` | фильтр листинга: id моделей с этими префиксами (эмбеддинги/realtime отсекаются) |
 | `modelsCacheMs` | `600000` | срок жизни листинга |
 | `providerID` | `"yandex-ai-studio"` | id провайдера в OpenCode |
 | `folderId` | из профиля `yc` (`config get folder-id`) | folder id для заголовка `OpenAI-Project` (обязателен для user IAM-токенов) |
