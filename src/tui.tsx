@@ -16,27 +16,6 @@ export default Plugin.define({
     const [waiting, setWaiting] = createSignal(false)
     const [usage, setUsage] = createSignal<{ primaryPercent: number; secondaryPercent: number } | undefined>()
 
-    // Show the last known usage snapshot immediately, before the first
-    // usage.updated event arrives (it is emitted only on periodic refreshes).
-    // Retry a few times: the very first call can race the server-side plugin
-    // still loading in a freshly spawned location (it answers 400).
-    const fetchUsage = (attempt: number) =>
-      auth
-        .usage({})
-        .then((snapshot) => {
-          const s = snapshot as unknown as
-            | { primaryPercent: number; secondaryPercent: number }
-            | null
-            | undefined
-          if (s) {
-            setUsage({ primaryPercent: s.primaryPercent, secondaryPercent: s.secondaryPercent })
-          }
-        })
-        .catch(() => {
-          if (attempt < 4) setTimeout(() => void fetchUsage(attempt + 1), 1000 * attempt)
-        })
-    void fetchUsage(0)
-
     const notify = (title: string, message: string) =>
       void context.attention
         .notify({ title, message, notification: { when: "always" } })
@@ -104,20 +83,20 @@ export default Plugin.define({
 
     // Persistent status in the footer: waiting for the browser login, or the
     // usage snapshot once known (primary window % / weekly window %).
-    context.ui.slot({
-      append: "home.footer.status",
-      render: () => {
-        if (waiting()) return <text fg="yellow">YC[AUTH…]</text>
-        const u = usage()
-        if (!u) return null
-        const fg = u.primaryPercent >= 80 || u.secondaryPercent >= 80 ? "red" : "green"
-        return (
-          <text fg={fg}>
-            YC[{u.primaryPercent}%/{u.secondaryPercent}%]
-          </text>
-        )
-      },
-    })
+    // Two claims: the home screen footer and the in-session prompt footer.
+    const renderStatus = () => {
+      if (waiting()) return <text fg="yellow">YC[AUTH…]</text>
+      const u = usage()
+      if (!u) return null
+      const fg = u.primaryPercent >= 80 || u.secondaryPercent >= 80 ? "red" : "green"
+      return (
+        <text fg={fg}>
+          YC[{u.primaryPercent}%/{u.secondaryPercent}%]
+        </text>
+      )
+    }
+    context.ui.slot({ append: "home.footer.status", render: renderStatus })
+    context.ui.slot({ append: "prompt.footer.status", render: renderStatus })
 
     return () => {
       stop()
