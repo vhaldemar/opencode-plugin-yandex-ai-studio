@@ -400,7 +400,7 @@ export default Plugin.define({
       const seconds = Math.max(0, Math.round((resetAt - Date.now()) / 1000))
       const d = Math.floor(seconds / 86400)
       const h = Math.floor((seconds % 86400) / 3600)
-      const m = Math.round((seconds % 3600) / 60)
+      const m = Math.floor((seconds % 3600) / 60)
       const rel =
         d > 0 ? `${d} д ${h} ч` : h > 0 ? `${h} ч ${m} мин` : `${m} мин`
       return `, сброс через ${rel}`
