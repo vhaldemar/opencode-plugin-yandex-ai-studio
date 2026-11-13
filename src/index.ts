@@ -435,30 +435,40 @@ export default Plugin.define({
       return `, сброс через ${rel}`
     }
     const fmtWindow = (label: string, percent: number, resetAt?: number) => `${label}: ${percent}%${fmtReset(resetAt)}`
+    /** Report via a TUI toast (usage.report event), not a synthetic session
+     * message: the report must never become a prompt the agent answers to. */
+    const report = (text: string, variant: "info" | "success" | "warning" | "error") =>
+      rpc.events
+        .emit("usage.report", { text, variant } as never)
+        .catch((err: unknown) => console.error("yandex-ai-studio: report emit failed:", err))
     await ctx.command.transform((editor) => {
       editor.add({
         name: "yc-usage",
         description: "Show Yandex AI Studio subscription usage and rate limits",
-        execute: async ({ sessionID }) => {
-          let text: string
+        execute: async () => {
           try {
             await refreshUsage(true)
             const u = usage.snapshot
             if (!u) {
-              text = "❌ Yandex AI Studio: не удалось получить данные о квотах"
-            } else {
-              const warn = u.limitReached ? "⚠️ Лимит исчерпан!\n" : ""
-              text =
-                `📊 Yandex AI Studio (план ${u.planType})\n` +
-                warn +
-                fmtWindow("Окно 5ч", u.primaryPercent, u.primaryResetAt) +
-                "\n" +
-                fmtWindow("Окно 7д", u.secondaryPercent, u.secondaryResetAt)
+              await report("Не удалось получить данные о квотах", "error")
+              return
             }
+            const warn = u.limitReached ? "⚠️ Лимит исчерпан!\n" : ""
+            const text =
+              `📊 Yandex AI Studio (план ${u.planType})\n` +
+              warn +
+              fmtWindow("Окно 5ч", u.primaryPercent, u.primaryResetAt) +
+              "\n" +
+              fmtWindow("Окно 7д", u.secondaryPercent, u.secondaryResetAt)
+            const variant = u.limitReached
+              ? "error"
+              : u.primaryPercent >= QUOTA_WARN_PERCENT || u.secondaryPercent >= QUOTA_WARN_PERCENT
+                ? "warning"
+                : "success"
+            await report(text, variant)
           } catch (err) {
-            text = `❌ Yandex AI Studio: ${(err as Error).message}`
+            await report(`Не удалось получить квоты: ${(err as Error).message}`, "error")
           }
-          await ctx.session.synthetic({ sessionID, text })
         },
       })
     })
@@ -468,16 +478,17 @@ export default Plugin.define({
       editor.add({
         name: "yc-auth",
         description: "Refresh the Yandex Cloud IAM token (yc iam create-token)",
-        execute: async ({ sessionID }) => {
-          let text: string
+        execute: async () => {
           try {
             const state = await manager.force()
             await ctx.provider.reload()
-            text = `✅ Yandex AI Studio: IAM-токен обновлён, действует до ${new Date(state.expiresAt).toLocaleString()}`
+            await report(
+              `IAM-токен обновлён, действует до ${new Date(state.expiresAt).toLocaleString()}`,
+              "success",
+            )
           } catch (err) {
-            text = `❌ Yandex AI Studio: не удалось обновить IAM-токен: ${(err as Error).message}`
+            await report(`Не удалось обновить IAM-токен: ${(err as Error).message}`, "error")
           }
-          await ctx.session.synthetic({ sessionID, text })
         },
       })
     })

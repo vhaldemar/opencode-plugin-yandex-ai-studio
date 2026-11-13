@@ -74,6 +74,22 @@ export const YandexAuth = Rpc.define({
       },
     },
     /**
+     * Human-readable report requested via /yc-usage (or /yc-auth): shown by
+     * the TUI part as a toast. Unlike a synthetic session message, this never
+     * reaches the model — the agent is not asked to respond to it.
+     */
+    "usage.report": {
+      schema: {
+        type: "object",
+        properties: {
+          text: { type: "string" },
+          variant: { type: "string", enum: ["info", "success", "warning", "error"] },
+        },
+        required: ["text", "variant"],
+        additionalProperties: false,
+      },
+    },
+    /**
      * `yc` opened a browser for re-authorization and is blocking until
      * the user completes login (up to `timeoutMs`).
      */

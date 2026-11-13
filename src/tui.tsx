@@ -81,6 +81,18 @@ export default Plugin.define({
       }
     })
 
+    // /yc-usage and /yc-auth results: a toast, not a synthetic session message,
+    // so the report never becomes a prompt the agent answers to.
+    const stopReport = auth.events.on("usage.report", (event) => {
+      const data = event.data as { text: string; variant: "info" | "success" | "warning" | "error" }
+      context.ui.toast.show({
+        title: "Yandex AI Studio",
+        message: data.text,
+        variant: data.variant,
+        duration: 10_000,
+      })
+    })
+
     // Persistent status in the footer: waiting for the browser login, or the
     // usage snapshot once known (primary window % / weekly window %).
     // Two claims: the home screen footer and the in-session prompt footer.
@@ -103,6 +115,7 @@ export default Plugin.define({
       stopSucceeded()
       stopFailed()
       stopUsage()
+      stopReport()
       setWaiting(false)
     }
   },
