@@ -395,10 +395,15 @@ export default Plugin.define({
     })
 
     // ---- /yc-usage command: subscription quota snapshot ----
-    const fmtWindow = (label: string, percent: number, resetAt?: number) => {
-      const reset = resetAt ? `, сброс ${new Date(resetAt).toLocaleString()}` : ""
-      return `${label}: ${percent}%${reset}`
+    const fmtReset = (resetAt?: number) => {
+      if (!resetAt) return ""
+      const seconds = Math.max(0, Math.round((resetAt - Date.now()) / 1000))
+      const h = Math.floor(seconds / 3600)
+      const m = Math.round((seconds % 3600) / 60)
+      const rel = h > 0 ? `${h} ч ${m} мин` : `${m} мин`
+      return `, сброс через ${rel}`
     }
+    const fmtWindow = (label: string, percent: number, resetAt?: number) => `${label}: ${percent}%${fmtReset(resetAt)}`
     await ctx.command.transform((editor) => {
       editor.add({
         name: "yc-usage",
