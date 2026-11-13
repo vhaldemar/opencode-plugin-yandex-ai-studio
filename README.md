@@ -28,7 +28,6 @@
       "package": "/absolute/path/to/opencode-plugin-yandex-ai-studio",
       "options": {
         "profile": "your-yc-profile",
-        "folderId": "your-folder-id",
         "providerID": "yandex-ai-studio",
         "providerName": "Yandex AI Studio"
       }
