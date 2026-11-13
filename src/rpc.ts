@@ -23,6 +23,23 @@ export const YandexAuth = Rpc.define({
         additionalProperties: false,
       },
     },
+    usage: {
+      // Current subscription usage snapshot (or null before the first fetch).
+      input: { type: "object", properties: {}, additionalProperties: false },
+      output: {
+        type: ["object", "null"],
+        properties: {
+          planType: { type: "string" },
+          primaryPercent: { type: "number" },
+          secondaryPercent: { type: "number" },
+          primaryResetAt: { type: "number" },
+          secondaryResetAt: { type: "number" },
+          limitReached: { type: "boolean" },
+        },
+        required: ["planType", "primaryPercent", "secondaryPercent", "limitReached"],
+        additionalProperties: false,
+      },
+    },
   },
   events: {
     /**

@@ -126,6 +126,7 @@ export default Plugin.define({
         if (s.expiresAt !== undefined) out.expiresAt = s.expiresAt
         return out
       },
+      usage: async () => usage.snapshot ?? null,
     })
 
     // ---- token manager: single-flight refresh around `yc iam create-token` ----

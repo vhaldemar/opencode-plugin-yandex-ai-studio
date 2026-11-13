@@ -16,6 +16,21 @@ export default Plugin.define({
     const [waiting, setWaiting] = createSignal(false)
     const [usage, setUsage] = createSignal<{ primaryPercent: number; secondaryPercent: number } | undefined>()
 
+    // Show the last known usage snapshot immediately, before the first
+    // usage.updated event arrives (it is emitted only on periodic refreshes).
+    auth
+      .usage({})
+      .then((snapshot) => {
+        const s = snapshot as unknown as
+          | { primaryPercent: number; secondaryPercent: number }
+          | null
+          | undefined
+        if (s) {
+          setUsage({ primaryPercent: s.primaryPercent, secondaryPercent: s.secondaryPercent })
+        }
+      })
+      .catch(() => {})
+
     const notify = (title: string, message: string) =>
       void context.attention
         .notify({ title, message, notification: { when: "always" } })
