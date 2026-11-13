@@ -186,6 +186,14 @@ export default Plugin.define({
         if (!token) return
         try {
           const remote = await fetchModels(modelsEndpoint, token, { folderId })
+          // Listing ids embed the folder (gpt://<folder>/<name>/latest) and the
+          // API scopes them to the OpenAI-Project folder. A different folder in
+          // the ids means a config mixup (token or header from another cloud).
+          if (folderId && remote.length > 0 && !remote.some((m) => m.id.includes(`/${folderId}/`))) {
+            console.warn(
+              `yandex-ai-studio: листинг не содержит модель с folder «${folderId}» — проверьте, что folderId и профиль yc (${profile}) из одного облака`,
+            )
+          }
           const usable = remote.filter((m) => modelPrefixes.some((p) => m.id.startsWith(p)))
           if (remote.length > 0) {
             const seen = new Set(configured.map((m) => String(m.id)))
