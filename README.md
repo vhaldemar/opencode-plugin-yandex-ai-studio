@@ -36,11 +36,9 @@
       "package": "/home/lipkin/repos/opencode-plugin-yandex-ai-studio",
       "options": {
         "profile": "sandbox-fed",
-        "folderId": "<ваш folder id>",
+        "//": "folderId можно не указывать, если у профиля yc есть folder-id",
         "models": []
-          { "id": "yandexgpt-5.2", "name": "YandexGPT 5.2", "context": 32768 },
-          { "id": "yandexgpt-5.2-lite", "name": "YandexGPT 5.2 Lite", "context": 32768 }
-        ]
+      }
       }
     }
   ]
@@ -58,6 +56,7 @@
 | `modelsEndpoint` | `{baseURL}/models` | ручка листинга моделей (`null` — отключить листинг) |
 | `modelsCacheMs` | `600000` | срок жизни листинга |
 | `providerID` | `"yandex-ai-studio"` | id провайдера в OpenCode |
+| `folderId` | из профиля `yc` (`config get folder-id`) | folder id для заголовка `OpenAI-Project` (обязателен для user IAM-токенов) |
 | `models` | `[]` (только листинг) | модели поверх листинга (`string` или `{id, name, context}`) |
 | `ycBin` | `"yc"` | путь к бинарнику `yc` |
 | `quietTimeoutMs` | `10000` | таймаут quiet-режима |

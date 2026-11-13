@@ -1,4 +1,5 @@
 import { Model, Plugin, Provider } from "@opencode/plugin"
+import { execFile } from "node:child_process"
 import { fetchModels } from "./models.js"
 import { YandexAuth } from "./rpc.js"
 import {
@@ -46,6 +47,37 @@ const DEFAULT_MODELS_CACHE_MS = 10 * 60 * 1000
 
 const STORAGE_KEY = "iam-token"
 
+/**
+ * folderId precedence: plugin option → `yc config get folder-id --profile`.
+ * The OpenAI-compatible API requires it (OpenAI-Project header) for user IAM
+ * tokens; warns when neither source provides one.
+ */
+async function resolveFolderId(o: Options, profile: string, ycBin: string): Promise<string | undefined> {
+  if (o.folderId) return o.folderId
+  try {
+    const out = await new Promise<string>((resolve, reject) => {
+      execFile(
+        ycBin,
+        ["config", "get", "folder-id", "--profile", profile],
+        { timeout: 5_000 },
+        (err, stdout) => (err ? reject(err) : resolve(stdout)),
+      )
+    })
+    const folderId = out.trim()
+    if (folderId) {
+      console.log("yandex-ai-studio: folder-id taken from yc profile:", profile)
+      return folderId
+    }
+  } catch {
+    // Profiles without folder-id (pure federation auth) are normal.
+  }
+  console.warn(
+    `yandex-ai-studio: folderId не задан (ни в опциях, ни в профиле yc «${profile}»). ` +
+      "API вернёт ошибку без заголовка OpenAI-Project; укажите опцию folderId.",
+  )
+  return undefined
+}
+
 export default Plugin.define({
   id: "yandex-ai-studio",
   async setup(ctx) {
@@ -54,6 +86,10 @@ export default Plugin.define({
     const providerID = Provider.ID.make(o.providerID ?? "yandex-ai-studio")
     const baseURL = o.baseURL ?? DEFAULT_BASE_URL
     const refreshIntervalMs = o.refreshIntervalMs ?? DEFAULT_REFRESH_INTERVAL_MS
+    const ycBin = o.ycBin ?? "yc"
+
+    /** Explicit option wins; otherwise fall back to the yc profile's folder-id. */
+    const folderId = await resolveFolderId(o, profile, ycBin)
 
     // ---- RPC contract: auth events for the TUI part ----
     const rpc = await ctx.rpc.register(YandexAuth, {
@@ -76,7 +112,7 @@ export default Plugin.define({
     const manager = new TokenManager(
       {
         profile,
-        ycBin: o.ycBin,
+        ycBin,
         quietTimeoutMs: o.quietTimeoutMs,
         interactiveTimeoutMs: o.interactiveTimeoutMs,
         tokenTtlMs: o.tokenTtlMs ?? DEFAULT_TOKEN_TTL_MS,
@@ -138,7 +174,7 @@ export default Plugin.define({
         const token = manager.peek() ?? stored?.token
         if (!token) return
         try {
-          const remote = await fetchModels(modelsEndpoint, token, { folderId: o.folderId })
+          const remote = await fetchModels(modelsEndpoint, token, { folderId })
           if (remote.length > 0) {
             const seen = new Set(configured.map((m) => String(m.id)))
             inventory.models = remote
@@ -172,7 +208,7 @@ export default Plugin.define({
             // IAM token goes as `Authorization: Bearer <token>` (apiKey → bearer
             // in the openai-compatible package).
             apiKey: token,
-            ...(o.folderId ? { headers: { "OpenAI-Project": o.folderId } } : {}),
+            ...(folderId ? { headers: { "OpenAI-Project": folderId } } : {}),
           },
         },
         models: [...configured, ...inventory.models],
