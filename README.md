@@ -35,7 +35,7 @@
 
 Отчёты команд идут через RPC-событие `usage.report` в TUI-тост, а **не** synthetic-сообщением в сессию: synthetic имеет `delivery: "steer"`, то есть становится промптом, на который агент отвечает. Тост гарантирует, что отчёт — чисто UI-инфо: модель не привлекается, в сессию ничего не пишется, токены не тратятся (trade-off: отчёт живёт ~10 с и не остаётся в скролле сессии).
 
-Thinking efforts: из кураторского каталога тянется `supported_reasoning_levels` (+ `default_reasoning_level`). Базовая модель равна дефолтному effort'у; каждый другой effort экспонируется как вариант `provider/<model>#<effort>` — вариант кладёт `reasoning_effort` в тело chat-запроса (например `yandex-ai-studio/gpt://<folder>/glm-5.2/latest#high`). Reasoning-контент моделей приходит в `reasoning_content` и отображается нативно.
+Thinking efforts: из кураторского каталога тянется `supported_reasoning_levels` (+ `default_reasoning_level`). Базовая модель равна дефолтному effort'у; каждый другой effort экспонируется как вариант `provider/<model>#<effort>` — вариант кладёт `reasoning_effort` в тело chat-запроса (например `yandex-ai-studio/gpt://<folder>/<model>/latest#high`). Reasoning-контент моделей приходит в `reasoning_content` и отображается нативно.
 
 Квоты берутся из codex-ручки `GET {baseURL}/api/codex/usage` (folder через `x-folder-id`, кэш 60 с) и обновляются в фоне вместе с инвентарём моделей. При **429** (rate limit) retry-хук читает `reset_after_seconds` и ставит задержку повтора до момента сброса окна (с запасом 5 с, капа 15 мин) вместо слепого экспоненциального backoff.
 
@@ -50,12 +50,12 @@ Thinking efforts: из кураторского каталога тянется 
   "$schema": "https://opencode.ai/config.json",
   "plugins": [
     {
-      "package": "/home/lipkin/repos/opencode-plugin-yandex-ai-studio",
+      "package": "/absolute/path/to/opencode-plugin-yandex-ai-studio",
       "options": {
-        "profile": "sandbox-fed",
-        "folderId": "b1ghsjum2v37c2un8h64",
+        "profile": "your-yc-profile",
+        "folderId": "your-folder-id",
         "providerID": "yandex-ai-studio",
-        "providerName": "Yandex AI Studio (IAM)"
+        "providerName": "Yandex AI Studio"
       }
     }
   ]
@@ -70,7 +70,7 @@ OpenCode скрывает провайдеров, не входящих в `enab
 
 ```jsonc
 {
-  "enabled_providers": ["ai-studio", "yandex-ai-studio"]
+  "enabled_providers": ["your-existing-provider", "yandex-ai-studio"]
 }
 ```
 
