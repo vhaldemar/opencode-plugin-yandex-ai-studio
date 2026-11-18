@@ -143,6 +143,13 @@ export default Plugin.define({
       usage: async () => usage.snapshot ?? null,
     })
 
+    /** Report via a TUI toast (usage.report event), not a synthetic session
+     * message: the report must never become a prompt the agent answers to. */
+    const report = (text: string, variant: "info" | "success" | "warning" | "error") =>
+      rpc.events
+        .emit("usage.report", { text, variant } as never)
+        .catch((err: unknown) => console.error("yandex-ai-studio: report emit failed:", err))
+
     // ---- token manager: single-flight refresh around `yc iam create-token` ----
     const manager = new TokenManager(
       {
@@ -237,8 +244,12 @@ export default Plugin.define({
     const inventory = { models: [] as typeof configured, checkedAt: 0 }
     const allCodex = (pages: readonly CodexCatalogModel[]) => pages.filter((m) => m.visible && m.supportedInApi)
     let inventoryInflight: Promise<void> | undefined
+    let folderWarningShown = false
     const refreshModels = () => {
       if (codexModelsEndpoint === undefined && modelsEndpoint === undefined) return Promise.resolve()
+      // Both listings need the folder (header or URI): without it the API
+      // answers with an error, so skip the round trip and wait for the folder.
+      if (!folderId) return Promise.resolve()
       inventoryInflight ??= (async () => {
         let token = manager.peek() ?? stored?.token
         if (!token) return
@@ -368,7 +379,7 @@ export default Plugin.define({
           // Folder auto-discovery via the subscriptions API (the way the
           // Codex client picks its folder): explicit option always wins,
           // otherwise the first active subscription's folder does.
-          if (subscriptionsEndpoint !== undefined && !o.folderId) {
+          if (subscriptionsEndpoint !== undefined && !o.folderId && !folderId) {
             try {
               const token = manager.peek()
               if (token) {
@@ -384,16 +395,31 @@ export default Plugin.define({
                     `yandex-ai-studio: folder-id от подписки ${first.folderId} (тариф ${first.tariffId ?? "?"})`,
                   )
                   folderId = first.folderId
+                  folderWarningShown = false
                 }
               }
             } catch (err) {
               console.warn("yandex-ai-studio: subscriptions fetch failed:", (err as Error).message)
+              // `fetchSubscriptions` already retried 5xx internally, so this
+              // toast means every attempt failed. Without a folder the provider
+              // stays modelless, while the footer keeps working — a silent
+              // failure looks like a broken plugin, hence the explicit report.
+              // One toast per outage: the 2-minute folder timer keeps retrying.
+              if (!folderWarningShown) {
+                folderWarningShown = true
+                void report(
+                  `Не удалось определить folder: /subscriptions не ответил после ретраев (${(err as Error).message}). ` +
+                    "Модели не загрузятся; повторяю каждые 2 мин, либо задайте folderId в опциях плагина.",
+                  "error",
+                )
+              }
             }
           }
-          if (!folderId) {
-            console.warn(
-              "yandex-ai-studio: folderId не обнаружен (ни в опциях, ни в подписках, ни в профиле yc). " +
-                "API вернёт ошибку без заголовка OpenAI-Project; укажите опцию folderId.",
+          if (!folderId && !folderWarningShown) {
+            folderWarningShown = true
+            void report(
+              "folderId не обнаружен (ни в опциях, ни в подписках, ни в профиле yc): модели не загрузятся без OpenAI-Project",
+              "warning",
             )
           }
           if (
@@ -409,6 +435,17 @@ export default Plugin.define({
           console.error("yandex-ai-studio: token refresh failed:", err.message)
         })
     void kickRefresh()
+
+    // Folder discovery depends on the flaky `/subscriptions` endpoint
+    // (intermittent 500s). Retry faster than the 30-minute inventory tick while
+    // the folder is still unknown — otherwise one unlucky startup leaves the
+    // provider without models for half an hour.
+    const folderTimer =
+      subscriptionsEndpoint !== undefined && !o.folderId
+        ? setInterval(() => {
+            if (!folderId) void kickRefresh()
+          }, 2 * 60_000)
+        : undefined
 
     // ---- periodic check: refresh ahead of expiry, and stale model inventory ----
     const timer = setInterval(
@@ -480,12 +517,6 @@ export default Plugin.define({
       return `, сброс через ${rel}`
     }
     const fmtWindow = (label: string, percent: number, resetAt?: number) => `${label}: ${percent}%${fmtReset(resetAt)}`
-    /** Report via a TUI toast (usage.report event), not a synthetic session
-     * message: the report must never become a prompt the agent answers to. */
-    const report = (text: string, variant: "info" | "success" | "warning" | "error") =>
-      rpc.events
-        .emit("usage.report", { text, variant } as never)
-        .catch((err: unknown) => console.error("yandex-ai-studio: report emit failed:", err))
     await ctx.command.transform((editor) => {
       editor.add({
         name: "yc-usage",
@@ -541,6 +572,7 @@ export default Plugin.define({
     return () => {
       clearInterval(timer)
       if (usageTimer !== undefined) clearInterval(usageTimer)
+      if (folderTimer !== undefined) clearInterval(folderTimer)
       void retryHook.dispose()
     }
   },

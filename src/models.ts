@@ -141,6 +141,30 @@ export async function fetchSubscriptions(
   token: string,
   opts: { timeoutMs?: number; signal?: AbortSignal } = {},
 ): Promise<readonly UserSubscription[]> {
+  // The endpoint is flaky upstream: intermittent `500 internal server error`
+  // responses were observed in production (roughly 1 in 4 calls). A single
+  // failure during startup would leave the provider without a folder — and
+  // therefore without models — until the next inventory tick, so retry 5xx a
+  // couple of times with a short backoff. Other statuses (401/403/404) are
+  // real answers and are surfaced immediately.
+  let lastError: unknown
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, attempt * 500))
+    try {
+      return await fetchSubscriptionsOnce(endpoint, token, opts)
+    } catch (err) {
+      lastError = err
+      if (!(err instanceof ApiHttpError) || err.status < 500) throw err
+    }
+  }
+  throw lastError
+}
+
+async function fetchSubscriptionsOnce(
+  endpoint: string,
+  token: string,
+  opts: { timeoutMs?: number; signal?: AbortSignal },
+): Promise<readonly UserSubscription[]> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 5_000)
   const onAbort = () => controller.abort()
